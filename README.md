@@ -1,5 +1,4 @@
 # Event-Management-System
-# AI Event Management Platform
 
 ## Overview
 
