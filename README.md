@@ -40,7 +40,7 @@ The system automates event registration, participant management, QR code generat
 - Google Drive
 - QR Code API
 - PDF Generator
-- Google Gemini / OpenAI API
+- Google Gemini 
 
 ## Outcome
 
