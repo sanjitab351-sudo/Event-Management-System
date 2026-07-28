@@ -1,0 +1,196 @@
+{
+  "name": "2 - QR Attendance Check-in",
+  "nodes": [
+    {
+      "id": "wh2",
+      "name": "Check-in Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        200,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "attendance-checkin",
+        "responseMode": "responseNode"
+      }
+    },
+    {
+      "id": "findParticipant",
+      "name": "Find Participant Row",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        420,
+        300
+      ],
+      "parameters": {
+        "operation": "lookup",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Participants",
+          "mode": "list"
+        },
+        "lookupColumn": "ParticipantID",
+        "lookupValue": "={{ $json.query.pid }}"
+      }
+    },
+    {
+      "id": "alreadyIn",
+      "name": "Already Checked In?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        640,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.AttendanceStatus }}",
+              "rightValue": "Present",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "markPresent",
+      "name": "Mark Present + Timestamp",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        860,
+        420
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Participants",
+          "mode": "list"
+        },
+        "matchingColumns": [
+          "ParticipantID"
+        ],
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ParticipantID": "={{ $json.query.pid }}",
+            "AttendanceStatus": "Present",
+            "CheckInTime": "={{ $now.toISO() }}"
+          }
+        }
+      }
+    },
+    {
+      "id": "respondWelcome",
+      "name": "Respond: Welcome",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1080,
+        420
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "=\u2705 Checked in successfully. Welcome, {{ $('Find Participant Row').item.json.Name }}!"
+      }
+    },
+    {
+      "id": "respondDup",
+      "name": "Respond: Already Checked In",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        860,
+        220
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "=You already checked in at {{ $json.CheckInTime }}."
+      }
+    }
+  ],
+  "connections": {
+    "Check-in Webhook": {
+      "main": [
+        [
+          {
+            "node": "Find Participant Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Participant Row": {
+      "main": [
+        [
+          {
+            "node": "Already Checked In?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Already Checked In?": {
+      "main": [
+        [
+          {
+            "node": "Respond: Already Checked In",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Present + Timestamp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Present + Timestamp": {
+      "main": [
+        [
+          {
+            "node": "Respond: Welcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "note": "Set Google Sheets Document ID + Credential in each Google Sheets node after import."
+  }
+}

@@ -1,0 +1,340 @@
+{
+  "name": "1 - Registration & Participant Management",
+  "nodes": [
+    {
+      "id": "wh1",
+      "name": "Registration Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        200,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "event-registration",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "getEvent",
+      "name": "Get Event Details",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        420,
+        300
+      ],
+      "parameters": {
+        "operation": "lookup",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Events",
+          "mode": "list"
+        },
+        "lookupColumn": "EventID",
+        "lookupValue": "={{ $json.body.eventId }}"
+      }
+    },
+    {
+      "id": "countReg",
+      "name": "Count Existing Registrations",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        640,
+        300
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Participants",
+          "mode": "list"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "EventID",
+              "lookupValue": "={{ $('Registration Webhook').item.json.body.eventId }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "checkCapacity",
+      "name": "Capacity & Status OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        860,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('Get Event Details').item.json.Status }}",
+              "rightValue": "Open",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "leftValue": "={{ $items('Count Existing Registrations').length }}",
+              "rightValue": "={{ $('Get Event Details').item.json.Capacity }}",
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "genId",
+      "name": "Generate Participant ID & QR Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        220
+      ],
+      "parameters": {
+        "jsCode": "const eventId = $('Registration Webhook').item.json.body.eventId;\nconst name = $('Registration Webhook').item.json.body.name;\nconst email = $('Registration Webhook').item.json.body.email;\nconst phone = $('Registration Webhook').item.json.body.phone || '';\nconst participantId = 'P-' + eventId + '-' + Date.now().toString(36).toUpperCase();\nconst checkinBaseUrl = 'https://YOUR-N8N-DOMAIN/webhook/attendance-checkin';\nconst qrPayload = checkinBaseUrl + '?pid=' + participantId + '&eid=' + eventId;\nreturn [{ json: { participantId, eventId, name, email, phone, qrPayload,\n  registeredAt: new Date().toISOString() } }];"
+      }
+    },
+    {
+      "id": "getQR",
+      "name": "Generate QR Code Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        220
+      ],
+      "parameters": {
+        "url": "=https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={{ encodeURIComponent($json.qrPayload) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "appendParticipant",
+      "name": "Append Participant Row",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1520,
+        220
+      ],
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Participants",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ParticipantID": "={{ $('Generate Participant ID & QR Data').item.json.participantId }}",
+            "EventID": "={{ $('Generate Participant ID & QR Data').item.json.eventId }}",
+            "Name": "={{ $('Generate Participant ID & QR Data').item.json.name }}",
+            "Email": "={{ $('Generate Participant ID & QR Data').item.json.email }}",
+            "Phone": "={{ $('Generate Participant ID & QR Data').item.json.phone }}",
+            "RegisteredAt": "={{ $('Generate Participant ID & QR Data').item.json.registeredAt }}",
+            "AttendanceStatus": "Registered",
+            "CheckInTime": "",
+            "FeedbackSubmitted": "false",
+            "CertificateSent": "false"
+          }
+        }
+      }
+    },
+    {
+      "id": "sendConfirmation",
+      "name": "Send Confirmation + QR Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1740,
+        220
+      ],
+      "parameters": {
+        "sendTo": "={{ $('Generate Participant ID & QR Data').item.json.email }}",
+        "subject": "=Registration Confirmed: {{ $('Get Event Details').item.json.Name }}",
+        "message": "=Hi {{ $('Generate Participant ID & QR Data').item.json.name }},<br><br>You're registered for <b>{{ $('Get Event Details').item.json.Name }}</b> on {{ $('Get Event Details').item.json.Date }}.<br><br>Your Participant ID: <b>{{ $('Generate Participant ID & QR Data').item.json.participantId }}</b><br>Show the attached QR code at check-in.<br><br>See you there!",
+        "options": {
+          "attachmentsUi": {}
+        },
+        "attachmentsBinary": "data"
+      }
+    },
+    {
+      "id": "respondOk",
+      "name": "Respond: Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1960,
+        220
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"registered\", \"participantId\": $('Generate Participant ID & QR Data').item.json.participantId } }}"
+      }
+    },
+    {
+      "id": "respondFull",
+      "name": "Respond: Registration Closed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1080,
+        420
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"error\", \"message\": \"Registration closed or event full\" } }}",
+        "options": {
+          "responseCode": 400
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Registration Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get Event Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Event Details": {
+      "main": [
+        [
+          {
+            "node": "Count Existing Registrations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count Existing Registrations": {
+      "main": [
+        [
+          {
+            "node": "Capacity & Status OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Capacity & Status OK?": {
+      "main": [
+        [
+          {
+            "node": "Generate Participant ID & QR Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond: Registration Closed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Participant ID & QR Data": {
+      "main": [
+        [
+          {
+            "node": "Generate QR Code Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate QR Code Image": {
+      "main": [
+        [
+          {
+            "node": "Append Participant Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Participant Row": {
+      "main": [
+        [
+          {
+            "node": "Send Confirmation + QR Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Confirmation + QR Email": {
+      "main": [
+        [
+          {
+            "node": "Respond: Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "note": "Set Google Sheets Document ID + Credential in each Google Sheets node after import."
+  }
+}

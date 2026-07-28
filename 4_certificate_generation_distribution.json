@@ -1,0 +1,304 @@
+{
+  "name": "4 - Certificate Generation & Distribution",
+  "nodes": [
+    {
+      "id": "wh4",
+      "name": "Trigger Certificate Batch",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        200,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-certificates",
+        "responseMode": "responseNode"
+      }
+    },
+    {
+      "id": "getAttendees4",
+      "name": "Get Attendees (Present)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        420,
+        300
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Participants",
+          "mode": "list"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "EventID",
+              "lookupValue": "={{ $json.body.eventId }}"
+            },
+            {
+              "lookupColumn": "AttendanceStatus",
+              "lookupValue": "Present"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "splitAtt4",
+      "name": "Loop Over Attendees",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        640,
+        300
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "copyTemplate",
+      "name": "Copy Certificate Template (Drive)",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        860,
+        220
+      ],
+      "parameters": {
+        "resource": "file",
+        "operation": "copy",
+        "fileId": {
+          "__rl": true,
+          "value": "YOUR_CERT_TEMPLATE_DOC_ID",
+          "mode": "id"
+        },
+        "options": {
+          "name": "=Certificate - {{ $json.Name }}"
+        }
+      }
+    },
+    {
+      "id": "replaceText",
+      "name": "Fill In Name/Event (Docs API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1080,
+        220
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://docs.googleapis.com/v1/documents/{{ $json.id }}:batchUpdate",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDocsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ requests: [\n  { replaceAllText: { containsText: { text: '{{ParticipantName}}', matchCase: true }, replaceText: $('Loop Over Attendees').item.json.Name } },\n  { replaceAllText: { containsText: { text: '{{EventName}}', matchCase: true }, replaceText: $('Loop Over Attendees').item.json.EventID } },\n  { replaceAllText: { containsText: { text: '{{Date}}', matchCase: true }, replaceText: new Date().toLocaleDateString() } }\n] }) }}"
+      }
+    },
+    {
+      "id": "exportPdf",
+      "name": "Export as PDF (Drive)",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1300,
+        220
+      ],
+      "parameters": {
+        "resource": "file",
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $('Copy Certificate Template (Drive)').item.json.id }}",
+          "mode": "id"
+        },
+        "options": {
+          "googleFileConversion": {
+            "conversion": {
+              "docsToFormat": "application/pdf"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "sendCert",
+      "name": "Email Certificate",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1520,
+        220
+      ],
+      "parameters": {
+        "sendTo": "={{ $('Loop Over Attendees').item.json.Email }}",
+        "subject": "=Your Certificate of Participation",
+        "message": "=Hi {{ $('Loop Over Attendees').item.json.Name }},<br><br>Congratulations on completing the event! Your certificate is attached.<br><br>Thank you for participating.",
+        "options": {},
+        "attachmentsBinary": "data"
+      }
+    },
+    {
+      "id": "logCert",
+      "name": "Log Certificate Sent",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1740,
+        220
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Participants",
+          "mode": "list"
+        },
+        "matchingColumns": [
+          "ParticipantID"
+        ],
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ParticipantID": "={{ $('Loop Over Attendees').item.json.ParticipantID }}",
+            "CertificateSent": "true"
+          }
+        }
+      }
+    },
+    {
+      "id": "respondCertDone",
+      "name": "Respond: Batch Complete",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        860,
+        460
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"done\" } }}"
+      }
+    }
+  ],
+  "connections": {
+    "Trigger Certificate Batch": {
+      "main": [
+        [
+          {
+            "node": "Get Attendees (Present)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Attendees (Present)": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Attendees",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Attendees": {
+      "main": [
+        [
+          {
+            "node": "Copy Certificate Template (Drive)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond: Batch Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Copy Certificate Template (Drive)": {
+      "main": [
+        [
+          {
+            "node": "Fill In Name/Event (Docs API)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fill In Name/Event (Docs API)": {
+      "main": [
+        [
+          {
+            "node": "Export as PDF (Drive)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Export as PDF (Drive)": {
+      "main": [
+        [
+          {
+            "node": "Email Certificate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Certificate": {
+      "main": [
+        [
+          {
+            "node": "Log Certificate Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Certificate Sent": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Attendees",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "note": "Set Google Sheets Document ID + Credential in each Google Sheets node after import."
+  }
+}

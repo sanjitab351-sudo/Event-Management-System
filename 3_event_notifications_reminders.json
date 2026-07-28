@@ -1,0 +1,241 @@
+{
+  "name": "3 - Event Notifications & Reminders",
+  "nodes": [
+    {
+      "id": "sched3",
+      "name": "Every Hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        200,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "getEvents3",
+      "name": "Get All Events",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        420,
+        300
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Events",
+          "mode": "list"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "filterDue",
+      "name": "Filter: Reminder Due",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const now = new Date();\nconst out = [];\nfor (const item of $input.all()) {\n  const e = item.json;\n  const start = new Date(e.StartDateTime);\n  const hoursTo = (start - now) / 3600000;\n  if (hoursTo <= 24 && hoursTo > 23 && e.Reminder24hSent !== 'true') {\n    out.push({ json: { ...e, reminderType: '24h' } });\n  } else if (hoursTo <= 1 && hoursTo > 0 && e.Reminder1hSent !== 'true') {\n    out.push({ json: { ...e, reminderType: '1h' } });\n  }\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "splitEvents3",
+      "name": "Loop Over Due Events",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        860,
+        300
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "getParticipants3",
+      "name": "Get Registered Participants",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1080,
+        220
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Participants",
+          "mode": "list"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "EventID",
+              "lookupValue": "={{ $json.EventID }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "sendReminder",
+      "name": "Send Reminder Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1300,
+        220
+      ],
+      "parameters": {
+        "sendTo": "={{ $json.Email }}",
+        "subject": "=Reminder: {{ $('Loop Over Due Events').item.json.Name }} starts soon",
+        "message": "=Hi {{ $json.Name }},<br><br>This is a reminder that <b>{{ $('Loop Over Due Events').item.json.Name }}</b> starts at {{ $('Loop Over Due Events').item.json.StartDateTime }}.<br>Bring your Participant ID / QR code for check-in.<br><br>See you soon!"
+      }
+    },
+    {
+      "id": "markReminded",
+      "name": "Mark Reminder Sent",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1300,
+        420
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Events",
+          "mode": "list"
+        },
+        "matchingColumns": [
+          "EventID"
+        ],
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "EventID": "={{ $('Loop Over Due Events').item.json.EventID }}",
+            "={{ $('Loop Over Due Events').item.json.reminderType === '24h' ? 'Reminder24hSent' : 'Reminder1hSent' }}": "true"
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every Hour": {
+      "main": [
+        [
+          {
+            "node": "Get All Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get All Events": {
+      "main": [
+        [
+          {
+            "node": "Filter: Reminder Due",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter: Reminder Due": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Due Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Due Events": {
+      "main": [
+        [
+          {
+            "node": "Get Registered Participants",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Registered Participants": {
+      "main": [
+        [
+          {
+            "node": "Send Reminder Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Reminder Email": {
+      "main": [
+        [
+          {
+            "node": "Mark Reminder Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Reminder Sent": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Due Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "note": "Set Google Sheets Document ID + Credential in each Google Sheets node after import."
+  }
+}

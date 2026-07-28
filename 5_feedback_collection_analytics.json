@@ -1,0 +1,436 @@
+{
+  "name": "5 - Feedback Collection & Event Analytics",
+  "nodes": [
+    {
+      "id": "wh5a",
+      "name": "Feedback Submission Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        200,
+        200
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "event-feedback",
+        "responseMode": "responseNode"
+      }
+    },
+    {
+      "id": "appendFeedback",
+      "name": "Append Feedback Row",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        420,
+        200
+      ],
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Feedback",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ParticipantID": "={{ $json.body.participantId }}",
+            "EventID": "={{ $json.body.eventId }}",
+            "Rating": "={{ $json.body.rating }}",
+            "Comments": "={{ $json.body.comments }}",
+            "SubmittedAt": "={{ $now.toISO() }}"
+          }
+        }
+      }
+    },
+    {
+      "id": "markFeedback",
+      "name": "Mark Participant Feedback=true",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        640,
+        200
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Participants",
+          "mode": "list"
+        },
+        "matchingColumns": [
+          "ParticipantID"
+        ],
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ParticipantID": "={{ $json.body.participantId }}",
+            "FeedbackSubmitted": "true"
+          }
+        }
+      }
+    },
+    {
+      "id": "respondFeedback",
+      "name": "Respond: Thanks",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        860,
+        200
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "Thanks for your feedback!"
+      }
+    },
+    {
+      "id": "sched5",
+      "name": "Daily Report Time",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        200,
+        460
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 18 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "getEventsForReport",
+      "name": "Get Events Ended Today",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        420,
+        460
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Events",
+          "mode": "list"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "filterEnded",
+      "name": "Filter: Ended, Report Not Sent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        460
+      ],
+      "parameters": {
+        "jsCode": "const now = new Date();\nconst out = [];\nfor (const item of $input.all()) {\n  const e = item.json;\n  const end = new Date(e.EndDateTime);\n  if (end < now && e.ReportSent !== 'true') out.push({ json: e });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "splitEvents5",
+      "name": "Loop Over Ended Events",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        860,
+        460
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "getParticipants5",
+      "name": "Get Participants for Event",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1080,
+        380
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Participants",
+          "mode": "list"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "EventID",
+              "lookupValue": "={{ $json.EventID }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "getFeedback5",
+      "name": "Get Feedback for Event",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1080,
+        540
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Feedback",
+          "mode": "list"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "EventID",
+              "lookupValue": "={{ $('Loop Over Ended Events').item.json.EventID }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "buildReport",
+      "name": "Compute Analytics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        460
+      ],
+      "parameters": {
+        "jsCode": "const participants = $('Get Participants for Event').all().map(i => i.json);\nconst feedback = $input.all().map(i => i.json);\nconst event = $('Loop Over Ended Events').item.json;\nconst totalReg = participants.length;\nconst present = participants.filter(p => p.AttendanceStatus === 'Present').length;\nconst attendanceRate = totalReg ? ((present / totalReg) * 100).toFixed(1) : '0';\nconst ratings = feedback.map(f => Number(f.Rating)).filter(n => !isNaN(n));\nconst avgRating = ratings.length ? (ratings.reduce((a,b) => a+b, 0) / ratings.length).toFixed(2) : 'N/A';\nconst feedbackRate = present ? ((feedback.length / present) * 100).toFixed(1) : '0';\nreturn [{ json: { eventId: event.EventID, eventName: event.Name, totalReg, present,\n  attendanceRate, avgRating, feedbackCount: feedback.length, feedbackRate } }];"
+      }
+    },
+    {
+      "id": "emailReport",
+      "name": "Email Report to Organizer",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1520,
+        460
+      ],
+      "parameters": {
+        "sendTo": "organizer@yourorg.com",
+        "subject": "=Event Report: {{ $json.eventName }}",
+        "message": "=<h3>{{ $json.eventName }}</h3>Registrations: {{ $json.totalReg }}<br>Attended: {{ $json.present }} ({{ $json.attendanceRate }}%)<br>Avg. Feedback Rating: {{ $json.avgRating }} / 5<br>Feedback Responses: {{ $json.feedbackCount }} ({{ $json.feedbackRate }}%)"
+      }
+    },
+    {
+      "id": "markReportSent",
+      "name": "Mark Report Sent",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1740,
+        460
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Events",
+          "mode": "list"
+        },
+        "matchingColumns": [
+          "EventID"
+        ],
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "EventID": "={{ $('Loop Over Ended Events').item.json.EventID }}",
+            "ReportSent": "true"
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Feedback Submission Webhook": {
+      "main": [
+        [
+          {
+            "node": "Append Feedback Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Feedback Row": {
+      "main": [
+        [
+          {
+            "node": "Mark Participant Feedback=true",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Participant Feedback=true": {
+      "main": [
+        [
+          {
+            "node": "Respond: Thanks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Report Time": {
+      "main": [
+        [
+          {
+            "node": "Get Events Ended Today",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Events Ended Today": {
+      "main": [
+        [
+          {
+            "node": "Filter: Ended, Report Not Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter: Ended, Report Not Sent": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Ended Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Ended Events": {
+      "main": [
+        [
+          {
+            "node": "Get Participants for Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Participants for Event": {
+      "main": [
+        [
+          {
+            "node": "Get Feedback for Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Feedback for Event": {
+      "main": [
+        [
+          {
+            "node": "Compute Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Analytics": {
+      "main": [
+        [
+          {
+            "node": "Email Report to Organizer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Report to Organizer": {
+      "main": [
+        [
+          {
+            "node": "Mark Report Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Report Sent": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Ended Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "note": "Set Google Sheets Document ID + Credential in each Google Sheets node after import."
+  }
+}
